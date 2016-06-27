@@ -151,7 +151,7 @@ class cJavaDevelopmentKit
         }
         elseif($this.Ensure -eq [Ensure]::Present){
             # TODO : インストーラのパスがURLの場合ダウンロードしてから実行する処理を入れたい
-            if(-not (Test-Path $this.InstallerPath)){
+            if(!($this.InstallerPath) -or !(Test-Path $this.InstallerPath)){
                 throw New-Object System.IO.FileNotFoundException ("Installer not found at {0}" -f $this.InstallerPath)
             }
             else{
@@ -234,7 +234,7 @@ class cJavaDevelopmentKit
         $RegUninstallPath = $Params.RegUninstallPath
         $SearchName = $Params.SearchName
 
-        if(-not (Test-Path $RegSoftPath)){
+        if(!($RegSoftPath) -or !(Test-Path $RegSoftPath)){
             return [PSCustomObject]@{
                 Version = ''
                 ProductId = ''
