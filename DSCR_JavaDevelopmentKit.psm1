@@ -174,15 +174,15 @@ class cJavaDevelopmentKit
 
                     # 現在インストールされているすべてのJDK、JREを取得
                     $AllJdk = $this.GetJDK()
-                    $OldJdk = $AllJdk | where {$_.Version -ne $this.version}
-                    $CurrentJdk = $AllJdk | where {$_.Version -eq $this.version} 
+                    $OldJdk = @($AllJdk | where {$_.Version -ne $this.version})
+                    $CurrentJdk = @($AllJdk | where {$_.Version -eq $this.version})
 
                     $AllJre = $this.GetJRE()
-                    $OldJre = $AllJre | where {$_.Version -ne $this.version}
-                    $CurrentJre = $AllJre | where {$_.Version -eq $this.version}
+                    $OldJre = @($AllJre | where {$_.Version -ne $this.version})
+                    $CurrentJre = @($AllJre | where {$_.Version -eq $this.version})
                     
                     # 古いJavaのアンインストール処理
-                    if($OldJdk -and $OldJre){
+                    if($OldJdk -or $OldJre){ # or と and どっちが適切だろうか...
                         Write-Verbose ("Uninstall previous version of JRE and JDK.")
                         $this.UninstallJava(($OldJdk + $OldJre))
                     }
