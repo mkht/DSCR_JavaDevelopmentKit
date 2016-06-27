@@ -1,7 +1,7 @@
 ﻿@{
 
 # Script module or binary module file associated with this manifest.
-RootModule = 'cJavaDevelopmentKit.psm1'
+RootModule = 'DSCR_JavaDevelopmentKit.psm1'
 
 DscResourcesToExport = '*'
 
