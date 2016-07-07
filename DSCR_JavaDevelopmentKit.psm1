@@ -89,8 +89,11 @@ class cJavaDevelopmentKit
     [Ensure] $Ensure
 
     # インストーラのパス
-    [DscProperty()]
+    [DscProperty(Mandatory)]
     [string] $InstallerPath = ""
+
+    [DscProperty()]
+    [pscredential] $Credential
 
     [DscProperty()]
     [bool] $AddToPath = $true   #インストールしたJDKとJavaをPATHに追加するか否か
@@ -108,23 +111,25 @@ class cJavaDevelopmentKit
         Write-Verbose "Check JDK is installed or not."
         $Jdk = $this.GetJDK()
 
-        $this.isInstalled = $Jdk.IsInstalled
-        if($this.IsInstalled -eq $true){
+        $RetObj = [cJavaDevelopmentKit]::new()
+
+        $RetObj.isInstalled = $Jdk.IsInstalled
+        if($RetObj.IsInstalled -eq $true){
             if($Jdk | where {$_.Version -eq $this.Version}){
                 Write-Verbose ("Desired version of JDK is installed. ({0})" -f $this.Version)
-                $this.Ensure = [Ensure]::Present
+                $RetObj.Ensure = [Ensure]::Present
             }
             else{
                 Write-Verbose ("JDK is installed, but it is NOT desired version. ({0})" -f [string]$Jdk.Version)
-                $this.Ensure = [Ensure]::Absent
+                $RetObj.Ensure = [Ensure]::Absent
             }
         }
         else{
             Write-Verbose "JDK is NOT installed."
-            $this.Ensure = [Ensure]::Absent
+            $RetObj.Ensure = [Ensure]::Absent
         }
 
-        return $this 
+        return $RetObj
     } # End of Get()
 
     <# ================== TEST ================== #>
@@ -150,54 +155,95 @@ class cJavaDevelopmentKit
             Write-Verbose ("All tasks of this configruation is done.")                    
         }
         elseif($this.Ensure -eq [Ensure]::Present){
-            # TODO : インストーラのパスがURLの場合ダウンロードしてから実行する処理を入れたい
-            if(!($this.InstallerPath) -or !(Test-Path $this.InstallerPath)){
-                throw New-Object System.IO.FileNotFoundException ("Installer not found at {0}" -f $this.InstallerPath)
+            [System.Uri]$InstallerUri = $this.InstallerPath -as [System.Uri]
+            if($InstallerUri.IsLoopback -eq $null){
+                # インストーラパスが正しくない
+                Write-Warning ("InstallerPath is not valid Uri")
+                throw New-Object "System.InvalidCastException"
             }
-            else{
-                try{
-                    # TODO : インストーラのバージョンチェックを入れるか？
-                    [string[]]$setupArgs = "/s", "REBOOT=0" # インストールオプション(サイレント&再起動なし)
-                    if($this.DisableAutoUpdate){ $setupArgs += "AUTO_UPDATE=0" } # 自動更新無効
-                    if($this.DisableSponsorsOffer){ $setupArgs += "SPONSORS=0" } # スポンサーのオファーを表示しない
-                    if($this.NoStartMenu){ $setupArgs += "NOSTARTMENU=1" } # スタートメニューにショートカットを追加しない
 
-                    Write-Verbose 'Installing Jave Development Kit.'
-                    $exitCode = Start-Command -FilePath $this.InstallerPath -ArgumentList $setupArgs    # インストール実行
-                    if($exitCode -eq 0){
-                        Write-Verbose ("Install completed successfully.")
-                    }
-                    else{
-                        Write-Verbose ("Install Java Development Kit exited with errors. ExitCode : {0}" -f $exitCode)
-                        throw ("Install Java Development Kit exited with errors. ExitCode : {0}" -f $exitCode)
-                    }
-
-                    # 現在インストールされているすべてのJDK、JREを取得
-                    $AllJdk = $this.GetJDK()
-                    $OldJdk = @($AllJdk | where {$_.Version -ne $this.version})
-                    $CurrentJdk = @($AllJdk | where {$_.Version -eq $this.version})
-
-                    $AllJre = $this.GetJRE()
-                    $OldJre = @($AllJre | where {$_.Version -ne $this.version})
-                    $CurrentJre = @($AllJre | where {$_.Version -eq $this.version})
-                    
-                    # 古いJavaのアンインストール処理
-                    if($OldJdk -or $OldJre){ # or と and どっちが適切だろうか...
-                        Write-Verbose ("Uninstall previous version of JRE and JDK.")
-                        $this.UninstallJava(($OldJdk + $OldJre))
-                    }
-
-                    # パスに追加
-                    if($this.AddToPath){
-                        Write-Verbose ("Add to PATH")
-                        if($CurrentJdk) { Add-EnvironmentPath -Path (Join-Path $CurrentJdk.InstallLocation '\bin') -Target Machine | Out-Null }
-                        if($CurrentJre) { Add-EnvironmentPath -Path (Join-Path $CurrentJre.InstallLocation '\bin') -Target Machine | Out-Null }
-                    }
-
-                    Write-Verbose ("All tasks of this configruation is done.")                    
+            $GUID = New-Guid
+            try{
+                # インストーラのパスがURLの場合ダウンロードしてから実行する
+                # インストーラの場所によって処理分岐(ローカル or 共有フォルダ or Web)
+                if($InstallerUri.IsLoopback){
+                    # ローカルインストーラ使用
+                    $Installer = $InstallerUri.LocalPath
                 }
-                catch{
-                    throw $_
+                else{
+                    $DownloadFolder = Join-Path $env:TEMP $GUID
+                    if(! (Test-Path $DownloadFolder)){
+                        # ダウンロードフォルダが存在しない場合は作る
+                        Write-Verbose ("Create Temp folder ({0})" -f $DownloadFolder)
+                        New-Item -ItemType Directory -Path $DownloadFolder -ErrorAction stop | Out-Null
+                    }
+                    $Installer = Join-Path $DownloadFolder ([System.IO.Path]::GetFileName($InstallerUri.LocalPath)) -ErrorAction Stop
+                    if($InstallerUri.IsUnc){
+                        # インストーラを共有フォルダからローカルにDLする
+                        Write-Verbose ("Get installer from '{0}'" -f $InstallerUri.LocalPath)
+                        Copy-Item -Path $InstallerUri.LocalPath -Destination $Installer -Credential $this.Credential -ErrorAction Stop
+                    }
+                    elseif($InstallerUri.Scheme -match 'http|https|ftp'){
+                        # インストーラをWebからDL
+                        Write-Verbose ("Get installer from '{0}'" -f $InstallerUri.AbsoluteUri)
+                        Invoke-WebRequest -Uri $InstallerUri.AbsoluteUri -OutFile $Installer -Credential $this.Credential -TimeoutSec 300 -ErrorAction stop
+                    }
+                }
+                
+                if(-not (Test-Path $Installer)){
+                    # インストーラが見つからない(パス指定ミスか、DL失敗か)
+                    Write-Error ("Installer file not Found at {0}" -f $Installer)
+                    throw (New-Object System.IO.FileNotFoundException)
+                }
+
+                # TODO : インストーラのバージョンチェックを入れるか？
+                [string[]]$setupArgs = "/s", "REBOOT=0" # インストールオプション(サイレント&再起動なし)
+                if($this.DisableAutoUpdate){ $setupArgs += "AUTO_UPDATE=0" } # 自動更新無効
+                if($this.DisableSponsorsOffer){ $setupArgs += "SPONSORS=0" } # スポンサーのオファーを表示しない
+                if($this.NoStartMenu){ $setupArgs += "NOSTARTMENU=1" } # スタートメニューにショートカットを追加しない
+
+                Write-Verbose 'Installing Jave Development Kit.'
+                $exitCode = Start-Command -FilePath $Installer -ArgumentList $setupArgs    # インストール実行
+                if($exitCode -eq 0){
+                    Write-Verbose ("Install completed successfully.")
+                }
+                else{
+                    Write-Verbose ("Install Java Development Kit exited with errors. ExitCode : {0}" -f $exitCode)
+                    throw ("Install Java Development Kit exited with errors. ExitCode : {0}" -f $exitCode)
+                }
+
+                # 現在インストールされているすべてのJDK、JREを取得
+                $AllJdk = $this.GetJDK()
+                $OldJdk = @($AllJdk | where {$_.Version -ne $this.version})
+                $CurrentJdk = @($AllJdk | where {$_.Version -eq $this.version})
+
+                $AllJre = $this.GetJRE()
+                $OldJre = @($AllJre | where {$_.Version -ne $this.version})
+                $CurrentJre = @($AllJre | where {$_.Version -eq $this.version})
+                
+                # 古いJavaのアンインストール処理
+                if($OldJdk -or $OldJre){ # or と and どっちが適切だろうか...
+                    Write-Verbose ("Uninstall previous version of JRE and JDK.")
+                    $this.UninstallJava(($OldJdk + $OldJre))
+                }
+
+                # パスに追加
+                if($this.AddToPath){
+                    Write-Verbose ("Add to PATH")
+                    if($CurrentJdk) { Add-EnvironmentPath -Path (Join-Path $CurrentJdk.InstallLocation '\bin') -Target Machine | Out-Null }
+                    if($CurrentJre) { Add-EnvironmentPath -Path (Join-Path $CurrentJre.InstallLocation '\bin') -Target Machine | Out-Null }
+                }
+
+                Write-Verbose ("All tasks of this configruation is done.")                    
+            }
+            catch{
+                throw $_
+            }
+            finally{
+                $DownloadFolder = Join-Path $env:TEMP $GUID
+                if(Test-Path $DownloadFolder){
+                    # 一時フォルダは消す
+                    Remove-Item -Path $DownloadFolder -Recurse -Force -ErrorAction SilentlyContinue
                 }
             }
         }
