@@ -85,8 +85,8 @@ class cJavaDevelopmentKit
 
     # インストール -> Present , アンインストール -> Absent
     # 注意:Absentの場合Versionの値は関係なくインストールされているすべてのJDKとJREを消す
-    [DscProperty(Mandatory)]
-    [Ensure] $Ensure
+    [DscProperty()]
+    [Ensure] $Ensure = [Ensure]::Present
 
     # インストーラのパス
     [DscProperty(Mandatory)]
@@ -99,9 +99,12 @@ class cJavaDevelopmentKit
     [bool] $AddToPath = $true   #インストールしたJDKとJavaをPATHに追加するか否か
 
     # インストール時のオプション
+    [DscProperty()]
     [bool] $DisableSponsorsOffer = $true
+    [DscProperty()]
     [bool] $DisableAutoUpdate = $false
-    [bool] $NoStartMenu = $false
+    [DscProperty()]
+    [bool] $NoStartMenuShortcut = $false
 
     [bool] $isInstalled
 
@@ -200,7 +203,7 @@ class cJavaDevelopmentKit
                 [string[]]$setupArgs = "/s", "REBOOT=0" # インストールオプション(サイレント&再起動なし)
                 if($this.DisableAutoUpdate){ $setupArgs += "AUTO_UPDATE=0" } # 自動更新無効
                 if($this.DisableSponsorsOffer){ $setupArgs += "SPONSORS=0" } # スポンサーのオファーを表示しない
-                if($this.NoStartMenu){ $setupArgs += "NOSTARTMENU=1" } # スタートメニューにショートカットを追加しない
+                if($this.NoStartMenuShortcut){ $setupArgs += "NOSTARTMENU=1" } # スタートメニューにショートカットを追加しない
 
                 Write-Verbose 'Installing Jave Development Kit.'
                 $exitCode = Start-Command -FilePath $Installer -ArgumentList $setupArgs    # インストール実行
