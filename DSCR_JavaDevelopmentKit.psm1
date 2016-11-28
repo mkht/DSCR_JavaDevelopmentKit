@@ -165,32 +165,36 @@ class cJavaDevelopmentKit
                 throw New-Object "System.InvalidCastException"
             }
 
-            $GUID = New-Guid
+            $GUID = [Guid]::NewGuid()
+            $tmpDriveName = [Guid]::NewGuid()
             try{
+                #Credentialが指定されている場合PSDriveでマウント（Windows7対応のため）
+                if($this.Credential){
+                    New-PSDrive -Name $tmpDriveName -PSProvider FileSystem -Root (Split-Path $InstallerUri.LocalPath) -Credential $this.Credential -ErrorAction Stop | Out-Null
+                }
+
                 # インストーラのパスがURLの場合ダウンロードしてから実行する
                 # インストーラの場所によって処理分岐(ローカル or 共有フォルダ or Web)
-                if($InstallerUri.IsLoopback){
-                    # ローカルインストーラ使用
+                if($InstallerUri.IsLoopback -or $InstallerUri.IsUnc){
+                    # ローカル or UNCパス使用
                     $Installer = $InstallerUri.LocalPath
                 }
-                else{
+                elseif($InstallerUri.Scheme -match 'http|https|ftp'){
+                    # インストーラをWebからDL
                     $DownloadFolder = Join-Path $env:TEMP $GUID
                     if(! (Test-Path $DownloadFolder)){
-                        # ダウンロードフォルダが存在しない場合は作る
+                        # 一時ダウンロードフォルダ作る
                         Write-Verbose ("Create Temp folder ({0})" -f $DownloadFolder)
                         New-Item -ItemType Directory -Path $DownloadFolder -ErrorAction stop | Out-Null
                     }
                     $Installer = Join-Path $DownloadFolder ([System.IO.Path]::GetFileName($InstallerUri.LocalPath)) -ErrorAction Stop
-                    if($InstallerUri.IsUnc){
-                        # インストーラを共有フォルダからローカルにDLする
-                        Write-Verbose ("Get installer from '{0}'" -f $InstallerUri.LocalPath)
-                        Copy-Item -Path $InstallerUri.LocalPath -Destination $Installer -Credential $this.Credential -ErrorAction Stop
-                    }
-                    elseif($InstallerUri.Scheme -match 'http|https|ftp'){
-                        # インストーラをWebからDL
-                        Write-Verbose ("Get installer from '{0}'" -f $InstallerUri.AbsoluteUri)
-                        Invoke-WebRequest -Uri $InstallerUri.AbsoluteUri -OutFile $Installer -Credential $this.Credential -TimeoutSec 300 -ErrorAction stop
-                    }
+                    Write-Verbose ("Get installer from '{0}'" -f $InstallerUri.AbsoluteUri)
+                    Invoke-WebRequest -Uri $InstallerUri.AbsoluteUri -OutFile $Installer -Credential $this.Credential -TimeoutSec 300 -ErrorAction stop
+                }
+                else{
+                    # インストーラパスが正しくない
+                    Write-Warning ("InstallerPath is not valid Uri")
+                    throw New-Object "System.InvalidOperationException"
                 }
                 
                 if(-not (Test-Path $Installer)){
@@ -247,6 +251,10 @@ class cJavaDevelopmentKit
                 if(Test-Path $DownloadFolder){
                     # 一時フォルダは消す
                     Remove-Item -Path $DownloadFolder -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                if(Get-PSDrive | where {$_.Name -eq $tmpDriveName}){
+                    # PSDriveアンマウント
+                    Remove-PSDrive -Name $tmpDriveName -Force -ErrorAction SilentlyContinue
                 }
             }
         }

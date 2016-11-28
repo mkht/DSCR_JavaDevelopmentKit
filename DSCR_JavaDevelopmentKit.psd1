@@ -6,7 +6,7 @@ RootModule = 'DSCR_JavaDevelopmentKit.psm1'
 DscResourcesToExport = '*'
 
 # Version number of this module.
-ModuleVersion = '1.0'
+ModuleVersion = '1.1'
 
 # ID used to uniquely identify this module
 GUID = '638bbd31-0879-478c-9e03-4de29b183ca5'
